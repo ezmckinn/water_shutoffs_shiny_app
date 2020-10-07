@@ -29,7 +29,7 @@ library(DT)
           em(
             tags$p(strong("Water is a human right.")),
             tags$p("But for low-income communities, it is not a guarantee. Rising water prices and aging infrastructure can leave many without access.",
-            tags$p("This map presents water disconnections from 2007-2019 in Cleveland, OH.")       
+            tags$p("This map presents water disconnections from 2009-2017 in Cleveland, OH.")       
           )  
           )
           ),
@@ -46,9 +46,9 @@ library(DT)
                         label = strong("Select Map Variable"),
                         choices = c('Total Shutoffs',
                                     'Shutoffs Per 1000 Residents',
-                                    'Median Household Income',
+                                    #'Median Household Income',
                                     'Household Poverty Rate',
-                                    'Percent Renting',
+                                    'Percent Renters',
                                     'Percent Non-White'
                         ))
     
@@ -67,11 +67,11 @@ library(DT)
           
           selectInput("ind_var_choice", 
                     label = strong("Select Independent Variable"),
-                     choices = c('Median Household Income',
+                     choices = c(#'Median Household Income',
                                  'Household Poverty Rate',
                                  'Percent Renters',
                                  'Percent Non-White',
-                                 'Log-adjusted MHI',
+                                 #'Log-adjusted MHI',
                                  'Log-adjusted % Non-White'
           ), selected = 'Household Poverty Rate')
         )
