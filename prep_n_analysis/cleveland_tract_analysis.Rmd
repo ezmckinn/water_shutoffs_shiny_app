@@ -9,7 +9,7 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-setwd("/Users/emmettmckinney/Dropbox (MIT)/RAship/ESI_Water_Affordability_031120/Data/WBEZ_Data/Cleveland")
+setwd("/Users/emmettmckinney/Documents/CodeAcademy/Water_Shutoffs_App")
 ```
 
 ```{r}
@@ -28,7 +28,7 @@ library(ggplot2)
 ```
 
 ```{r}
-shutoffs <- st_read("/Users/emmettmckinney/Dropbox (MIT)/RAship/ESI_Water_Affordability_031120/Data/WBEZ_Data/Cleveland/Data/cleveland_all_years_tract_summary_acs.geojson") %>% mutate(shutoffs_1000p = ((n_shutoffs_tract)/(Total_Pop/1000)),
+shutoffs <- st_read("/Users/emmettmckinney/Documents/CodeAcademy/Water_Shutoffs_App/data/cleveland_all_years_tract_summary_acs_test.geojson") %>% mutate(shutoffs_1000p = ((n_shutoffs_tract)/(Total_Pop/1000)),
          shutoffs_HH = (n_shutoffs_tract)/TotalHH,
          Prc_W = White / Total_Pop,
          Prc_Blk = Black / Total_Pop,
@@ -45,8 +45,8 @@ shutoffs <- st_read("/Users/emmettmckinney/Dropbox (MIT)/RAship/ESI_Water_Afford
          log_Prc_NonW = log(Prc_NonW),
          log_NonW_Own = log(Prc_NonW_Own),
          log_shut = log(n_shutoffs_tract),
+         log_shut_1000p = log(shutoffs_1000p),
          log_MHI = log(MHI),
-         log_Lowest_HI_Quintile = log(Lowest_HI_Quintile),
           Maj_Minority = if_else(Prc_NonW > 0.5, "Yes", "No"),
           log_Prc_Blk = log(Prc_Blk), 
           log_MHI = log(MHI)) %>% filter(Total_Pop>0)
@@ -57,7 +57,8 @@ st_write(shutoffs, delete_dsn = TRUE, "./cleveland_tract_analysis.geojson")
 ```{r}
 a <- plot(shutoffs['n_shutoffs_tract']) 
 b <- plot(shutoffs['shutoffs_1000p'])
-c <- plot(shutoffs['Prc_HH_Pov])
+c <- plot(shutoffs['Prc_HH_Pov'])
+d <- plot(shutoffs['Prc_NonW'])
 ```
 
 **Analyze Shutoff Frequency Across Zip Codes - non spatial regression**
@@ -95,13 +96,16 @@ overall_summary
 means <- data.frame(shutoffs) %>% group_by(Maj_Minority) %>% summarise(mean = mean(log_shut))
 means
 
-p <- ggplot(shutoffs, aes(x=log_shut, fill = Maj_Minority, color = Maj_Minority)) +
+p <- ggplot(shutoffs, aes(x=log_shut, fill = Maj_Minority)) +
+  theme(legend.title = element_blank()) +
   geom_histogram(position = "identity", alpha = 0.5, bins = 50) + 
-  ggtitle("Shutoff Orders by Census Tract and Racial Majority, Cleveland") +
-  scale_fill_discrete(name = "Racial Makeup", labels = c("Majority White", "Majority Non-White")) +
+  ggtitle("Shutoff Orders by Majority Minority Status, Cleveland") +
+  labs(fill = "Majority Minority") +
+ # scale_fill_discrete(name = "Racial Makeup", labels = c("Majority White", "Majority Non-White")) +
   ylab("Number of Census Tracts") +
   xlab("Log Number of Shutoffs") +
-   geom_vline(data=means, aes(xintercept=mean, colour=Maj_Minority), linetype="dashed", size=1, show.legend = TRUE) 
+  geom_vline(data=means, aes(xintercept=mean, colour=Maj_Minority), linetype="dashed", size=1, show.legend = TRUE, theme(legend.position = "none"))
+
  
 p
 ```
