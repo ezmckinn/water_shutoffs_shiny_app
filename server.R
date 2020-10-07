@@ -13,6 +13,7 @@ library(ggplot2)
 library(sf)
 library(dplyr)
 library(DT)
+library(RColorBrewer)
 
 setwd("/Users/emmettmckinney/Documents/CodeAcademy/Water_Shutoffs_App")
 
@@ -24,8 +25,8 @@ shutoffs <- st_read("data/cleveland_tract_year_shutoffs.geojson")
  
 shinyServer(function(input, output) {
 
-choose_map_var <- reactive({
-        switch(input$map_var,
+map_var <- reactive({
+        switch(input$map_var_choice,
                "Total Shutoffs" = shutoffs$n_shutoffs_tract,
                "Shutoffs Per 1000 Residents" = shutoffs$shutoffs_1000p,
                'Median Household Income' = shutoffs$MHI,
@@ -35,16 +36,16 @@ choose_map_var <- reactive({
     })
     
     
-choose_var <- reactive({
-            switch(input$var,
+dep_var <- reactive({
+            switch(input$dep_var_choice,
                    "Total Shutoffs" = shutoffs$n_shutoffs_tract,
                    "Shutoffs Per 1000 Residents" = shutoffs$shutoffs_1000p,
                    "Log-adjusted Total Shutoffs" = shutoffs$log_shut
                    ) 
         })
 
-choose_var_2 <- reactive({
-   switch(input$var2,
+ind_var <- reactive({
+   switch(input$ind_var_choice,
           'Median Household Income' = shutoffs$MHI,
           'Household Poverty Rate' = shutoffs$Prc_HH_Pov * 100,
           'Percent Renters' = shutoffs$Prc_Rnt * 100,
@@ -54,59 +55,78 @@ choose_var_2 <- reactive({
     
 })
 
-
-        #Basic Linear Regression Models
+        #Basic Linear Regression Model
         
-lm1 <- reactive({lm(choose_var() ~ choose_var_2(), data = shutoffs)})
+lm1 <- reactive({lm(dep_var() ~ ind_var(), data = shutoffs)})
 
-        #output$scatter <- renderPrint({plot(lm1())})
+        #Results Tables
+        output$print_ind_var <- renderText({ 
+            paste("Independent:", input$ind_var_choice)
+            })
+        
+        output$print_dep_var <- renderText({ 
+            paste("Dependent:", input$dep_var_choice)
+        })
         
         output$reg <- renderPrint({summary(lm1())})
         
-        output$scatter <- renderPlot({ggplot(shutoffs, aes(x = choose_var_2(), y = choose_var())) + 
+        output$scatter <- renderPlot({ggplot(shutoffs, aes(x = ind_var(), y = dep_var())) + 
                                                  geom_point() +
-                                                 stat_smooth(method = "lm", col = "red")})
+                                                 stat_smooth(method = "lm", col = "deepskyblue4") +
+                                                    xlab(paste0(input$ind_var_choice)) +
+                                                    ylab(paste0(input$dep_var_choice))})
         
         #Create Histogram
         
         output$hist <- renderPlot({
-                ggplot(shutoffs, aes(x=choose_var(), fill = Maj_Minority, color = Maj_Minority)) +
+                ggplot(shutoffs, aes(x=dep_var(), fill = Maj_Minority, color = Maj_Minority)) +
                 geom_histogram(position = "identity", alpha = 0.5, bins = 50) + 
                 scale_fill_discrete(labels = c("Majority White", "Majority Non-White")) +
                 ylab("Number of Census Tracts") +
-                xlab(paste0(input$var))})
+                xlab(paste0(input$ind_var_choice))
+            })
+        
+        #Title for Histogram
+        output$hist_title <- renderUI({
+                str1 <- paste("Histogram of", input$ind_var_choice)
+                str2 <- paste("by Racial Makeup (Census Tract)")
+                HTML(paste(str1, str2))
+        })
         
         #Add map element 
         output$mymap <- renderLeaflet({
             
         pal <- colorBin(
                 palette = "Blues",
-                domain = c(min(choose_map_var()), max(choose_map_var()),
+                domain = c(min(map_var()), max(map_var()),
                            bins=10))
             
           leaflet(st_transform(shutoffs, 4326)) %>% 
                 addProviderTiles(providers$Stamen.TonerLite) %>%  #tile layer 
                 addPolygons(smoothFactor = 0.2, fillOpacity = 0.8, #style polygons 
                             color = "#fff", weight = 1,  
-                            fillColor = ~pal(choose_map_var())) %>%
-                addLegend("bottomright", pal = pal, values = ~choose_map_var(),
-                        title = paste0(input$var),
+                            fillColor = ~pal(map_var())) %>%
+                addLegend("bottomright", pal = pal, values = ~map_var(),
+                        title = paste0(input$map_var_choice),
                         opacity = 1
               )
           })
 
         #summary stats for the city 
-        output$stats <- renderPrint({summary(choose_var())})
+        output$dep_stats <- renderPrint({summary(dep_var())})
+        output$ind_stats <- renderPrint({summary(ind_var())})
         
         #Data Table
         output$mytable = DT::renderDataTable({
             shutoffs %>% select(-geometry)
         })
-            
+
+
+       
            
 }) ## END 
        
-            
+
         
     
         

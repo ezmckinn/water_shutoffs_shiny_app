@@ -1,49 +1,72 @@
-**User Interface for the Water Vulnerability Explorer (WaVE)**
+#
+# This is the user-interface definition of a Shiny web application. You can
+# run the application by clicking 'Run App' above.
+#
+# Find out more about building applications with Shiny here:
+#
+#    http://shiny.rstudio.com/
+#
 
 library(shiny)
 library(shinydashboard)
+library(dashboardthemes)
 library(leaflet)
 library(DT)
 
-    ui <- dashboardPage( #build dashboard page
+# Define UI for application that draws a histogram
+
+    ui <- dashboardPage(skin = 'blue',
       
-        dashboardHeader(title = "Midwestern Water Shutoffs", #title
-                        titleWidth = 300), #header width
+        dashboardHeader(title = strong("Water Vulnerability Explorer (WaVE)"),
+                        titleWidth = 300),
         
-        dashboardSidebar( 
+        dashboardSidebar(
+          
           width = 300,
-         
+          
+          wellPanel(style = "color:black",
+                            
+          em(
+            tags$p(strong("Water is a human right.")),
+            tags$p("But for low-income communities, it is not a guarantee. Rising water prices and aging infrastructure can leave many without access.",
+            tags$p("This map presents water disconnections from 2007-2019 in Cleveland, OH.")       
+          )  
+          )
+          ),
+          
+          
           #Variable Selector Input
           
-          wellPanel(
+          wellPanel(style = "color:black,
+                             padding-top: 12 px;
+                             padding-bottom: 10 px",
             
-            "Display Variable",
-            
-            selectInput("map_var", 
-                        label = "Select Independent Variable",
-                        choices = c('Total Shutoffs',   #menu options 
+  
+          selectInput("map_var_choice", 
+                        label = strong("Select Map Variable"),
+                        choices = c('Total Shutoffs',
                                     'Shutoffs Per 1000 Residents',
                                     'Median Household Income',
                                     'Household Poverty Rate',
                                     'Percent Renting',
                                     'Percent Non-White'
                         ))
-            
+    
           ),
           
-          wellPanel( #second panel for Regression Model variables 
+          wellPanel(style = "color:black,
+                             padding-top: 12 px;
+                             padding-bottom: 10 px",
           
-          "Regression Model Variables", 
-            
-          selectInput("var", 
-                      label = "Select Dependent Variable",
+          selectInput("dep_var_choice", 
+                      label = strong("Select Dependent Variable"),
                       choices = c("Total Shutoffs", 
                                   "Shutoffs Per 1000 Residents",
                                   "Log-adjusted Total Shutoffs"
                       ), selected = 'Shutoffs Per 1000 Residents'),
           
-          selectInput("var2", 
-                    label = "Select Independent Variable",
+          selectInput("ind_var_choice", 
+                    label = strong("Select Independent Variable"),
                      choices = c('Median Household Income',
                                  'Household Poverty Rate',
                                  'Percent Renters',
@@ -56,26 +79,52 @@ library(DT)
            
         dashboardBody(
           
+          
+          shinyDashboardThemes(theme = 'blue_gradient'),
+          
           tabsetPanel(
           
           tabPanel("Map", 
-                   leafletOutput("mymap"),
+                   wellPanel(style = "padding-top: 12 px;
+                                      padding-bottom: 10 px",
+                   leafletOutput("mymap")
+                   ),
                    
-                   "Histogram of Independent Variable, by Majority-Minority Population",
+                   wellPanel(
                    
-                   plotOutput("hist"),
+                   strong(htmlOutput("hist_title")),
+                   
+                   br(),
+                   
+                   plotOutput("hist")
+                   ),
                    
                    value = "Map"),
                   # 
-          tabPanel("Model", 
+          tabPanel("Model", style = "padding-top: 12 px;
+                            padding-bottom: 10 px",
+                   p(''),
                    
-                   plotOutput("scatter"),
+                   strong(p("Plot")),
                    
-                   "Summary Statistics (Independent Variable by Census Tract)",
+                   wellPanel(
+                                        
+                   plotOutput("scatter")
+                   ),
                    
-                   verbatimTextOutput("stats", placeholder = FALSE),
+                   strong(p("Summary Statistics")),
                    
-                   "Regression Model Results",
+                   fluidRow(
+                     column(6, wellPanel(style = "padding-bottom: 10 px",
+                       p(textOutput("print_ind_var")),
+                   verbatimTextOutput("ind_stats", placeholder = FALSE))),
+          
+                      column(6, wellPanel(style = "padding-bottom: 10 px",
+                        p(textOutput("print_dep_var")),
+                   verbatimTextOutput("dep_stats", placeholder = FALSE))),
+                   ),
+                   
+                   p(strong("Regression Results")),
                    
                    verbatimTextOutput("reg", placeholder = FALSE),
                   value = "Model"),
@@ -83,14 +132,17 @@ library(DT)
           tabPanel("The Data", DT::dataTableOutput("mytable")),
           
           tabPanel("About",
-          "Data for this project were collected through public records requests by American Public Media, and analyzed by Emmett McKinney at MIT-DUSP. Learn more at http://americanwatershutoffs.mit.edu/.",
+          p(''),
+          p("Data for this project were collected through public records requests by", a("American Public Media", href = "https://www.apmreports.org/story/2019/02/07/great-lakes-water-shutoffs"), "and analyzed by Emmett McKinney."),
+          p("Learn more at the", a("American Water Shutoffs", href = "http://americanwatershutoffs.mit.edu/"), "blog."),
           value = "About")
+          
+            
           )
         )
       )
-    
-        
-
+  
+  
         
     
     
