@@ -1,0 +1,304 @@
+---
+title: "Cleveland Tract-Level Analysis"
+author: "Emmett"
+date: "6/2/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+setwd("/Users/emmettmckinney/Dropbox (MIT)/RAship/ESI_Water_Affordability_031120/Data/WBEZ_Data/Cleveland")
+
+#install new census key, over-writing any old keys.
+
+Sys.setenv(CENSUS_KEY="4c8277e5003e698cf77bbda813f1bcc7eb332b31") #set API key
+readRenviron("~/.Renviron") #update R to use census key.
+```
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggmap)
+library(sf)
+library(sp)
+library(tidycensus)
+library(tidyverse)
+```
+
+***PART 0: READING IN DATA**
+
+```{r}
+geo <- get_acs( # get census tract geometries for 2017
+  geography = "tract",
+  variables = "B02001_001",
+  county = "Cuyahoga",
+  state = "OH",
+  year = 2017,
+  survey = "acs5",
+  geometry = TRUE, #specify that we need the geometries 
+  ) %>%
+  select(GEOID, geometry) #only need GEOID and geometry columns
+
+geo <- st_transform(geo, 4326) #change crs
+```
+
+```{r}
+#read in cleveland parcel data - donwloaded from Cuyahoga County Open Data
+
+parcels_raw <- st_read("/Users/emmettmckinney/Dropbox (MIT)/RAship/ESI_Water_Affordability_031120/Data/WBEZ_Data/Cleveland/cleveland_raw_parcels.geojson") %>% filter(par_addr_a != "0  NO STR NO SUFF, CLEVELAND, OH, 0") #filter out empty parcels
+nrow(parcels_raw) 
+
+parcels_raw_geom <- parcels_raw %>% select("OBJECTID","geometry","mail_addr_")
+```
+
+```{r}
+#Read in payment plans
+plans <- read.csv("./Data/cleveland_qualifying_payment_plans_2009-2017.csv") 
+plans$id <- seq.int(nrow(plans)) #create unique ID for each payment plan
+
+plans <- plans %>% mutate(
+    address = as.character(address),
+    city = as.character(city),
+    zip5 = as.character(zip5),
+    state = "OH"
+  ) %>%
+  filter(city == "CLEVELAND") #make sure we only have payment plans for the city of cleveland
+```
+
+```{r}
+#Read in realized shutoff orders 
+
+shutoffs <- read.csv("/Users/emmettmckinney/Dropbox (MIT)/RAship/ESI_Water_Affordability_031120/Data/WBEZ_Data/Cleveland/Data/cleveland_shutoffs_2010-2017.csv")
+
+shutoffs_sp <- st_as_sf(shutoffs, coords = c("longitude","latitude"), crs = 4326) #change the .csv to a spatial object, with shutoffs as points.
+#set coordinate reference system 
+
+rm(shutoffs) #drop initial csv file to keep workspace tidy.
+```
+
+```{r}
+#read in shutoff notices data.
+
+notices <- read.csv("/Users/emmettmckinney/Dropbox (MIT)/RAship/ESI_Water_Affordability_031120/Data/WBEZ_Data/Cleveland/Data/cleveland_shutoff_notices_2009-2017.csv")
+```
+
+***PART 1: SUMMARIZING SHUTOFFS, PAYMENT PLANS, & NOTICES BY PARCEL & YEAR***
+
+```{r}
+#join shutoffs data to census tract & count by tract
+
+shutoffs_by_tract <- st_join(geo, shutoffs_sp, join = st_intersects) #join
+
+shutoffs_tract_summary <- shutoffs_by_tract %>% count(GEOID, disconnection_year) %>% rename("n_shutoffs_tract" = "n") %>% as.data.frame %>% select(-geometry)
+
+#use count operator to count for each GEOID and disconnection year 
+
+```
+
+
+```{r}
+#join shutoff notices to parcels — 
+shutoffs_parcels <- st_join(shutoffs_sp, parcels_raw_geom, join = st_intersects, left = TRUE) 
+
+#count observations by parcel
+shutoffs_count <- shutoffs_parcels %>% count(mail_addr_) %>% as.data.frame() %>% rename("n_shutoffs" = "n") %>% select(-geometry) #convert back to data frame so column header can be changed 
+
+notices_count <- notices %>% count(address) %>% rename("n_notices" = "n")
+plans_count <- plans %>% count(address) %>% rename("n_plans" = "n")  #count the number of observations by address
+
+parcels_all_year_summary <- parcels_raw %>% left_join(shutoffs_count, by = c("mail_addr_" = "mail_addr_")) %>%
+                            left_join(plans_count, by = c("mail_addr_" = "address")) %>%
+                            left_join(notices_count, by = c("mail_addr_" = "address"))
+
+
+nrow(parcels_all_year_summary) #check how many rows there are in the dataset
+```
+
+
+```{r}
+#Tidy Up
+
+rm(plans_count)
+rm(notices_count)
+#rm(shutoffs_count)
+
+st_write(parcels_all_year_summary, "cleveland_all_year_parcel.geojson", delete_dsn = TRUE) #convert it to sf feature
+write.csv(parcels_all_year_summary %>% select(-geometry), file = "./cleveland_all_year_parcel.csv")
+rm(parcels_all_year_summary)
+
+#count observations by individual years and parcel
+
+plans_count_by_year <- plans %>% count(address, payment_plan_start_year) %>% rename("n_plans" = "n")  #count the number of observations
+
+notices_count_by_year <- notices %>% count(address, notice_year) %>% rename("n_notices" = "n")
+
+shutoffs_count_by_year <- shutoffs_parcels %>% count(mail_addr_, disconnection_year) %>% rename("n_shutoffs_parcel" = "n") %>% as.data.frame() %>% select(-geometry) #count the number of observations by address %>% select(-geometry) 
+
+
+parcels_by_year_summary <- parcels_raw %>% 
+                            left_join(shutoffs_count_by_year, by = "mail_addr_") %>%
+                            left_join(plans_count_by_year, by = c("mail_addr_" = "address")) %>%
+                            left_join(notices_count_by_year, by = c("mail_addr_" = "address")) 
+                      
+
+st_write(parcels_by_year_summary, "cleveland_by_year_parcel.geojson", delete_dsn = TRUE) #convert it to sf feature and save it for future reference.
+write.csv(parcels_by_year_summary %>% select(-geometry),file = "./cleveland_by_year_parcel.csv")
+
+#remove data frames we don't need anymore
+rm(plans_count_by_year)
+rm(notices_count_by_year)
+rm(parcels_by_year_summary)
+rm(parcels_raw_geom)
+```
+
+***PART 2: JOINING TO ACS DATA***
+
+```{r}
+cleveland_parcels <- st_read("cleveland_by_year_parcel.geojson") %>% #read in parcel file
+  select(OBJECTID, payment_plan_start_year, n_shutoffs_parcel, n_shutoffs_tract, n_plans, n_notices, mail_addr_, mail_zip, parcelpin, cama_paren, parcel_id) %>%  #select columns we want
+  st_transform(4326) %>% #set coordinate reference system so that the projection is the same as other files 
+  st_buffer(0.0) #correct invalid geometries by adding a zero-width buffer 
+```
+
+```{r}
+#get some ACS data
+
+vars <- c(Total_Pop = "B02001_001", #total population 
+          White = "B02001_002", #white population
+          Black = "B02001_003", 
+          Native = "B02001_004", 
+          Asian = "B02001_005", 
+          Latino = "B03002_012",
+          HIPI = "B02001_006", 
+          Other = "B02001_007", 
+          TWOPLUS = "B02001_008", 
+          Utils_Incl = "B25069_001", #utilities ARE included in rent
+          MHI = "B19013_001", #median household income
+          TotalHH = "B25003_001", #total households
+          TotalOwn = "B25003_002", #owner occupied households
+          TotalRent = "B25003_003",
+          WhiteOwn = "B25003A_002", #white owner occupied households 
+          WhiteRent = "B25003A_003",
+          BlackOwn = "B25003B_002", #black owner occupied households 
+          BlackRent = "B25003B_003",
+          HispOwn = "B25003I_002",
+          HispRent = "B25003I_003",
+          MedYrBlt = "B25037_001", #median age of structure, total
+          RenYrBlt = "B25037_003", #median age of structure, renters
+          OwnYrBlt = "B25037_002",
+          HH_Poverty = "B17017_002",
+          Lowest_HI_Quintile = "B19080_001") #Number of Households with income under poverty level in past 12 months
+
+years <- lst(2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017) #set years for which we want data
+
+acs_data <- map_dfr( #call data from census bureau across years, usiing map_dfr to avoid calling multiple times.
+  years,
+  ~ get_acs(
+    geography = "tract",
+    variables = vars,
+    county = "Cuyahoga",
+    state = "OH",
+    year = .x,
+    output = 'wide',
+    survey = "acs5"
+    ),
+  .id = "year") 
+
+acs_data <- acs_data %>% select(c(GEOID, year, ends_with("E"))) #select only the estimates, drop margin of error for now.
+acs_data$year <- as.numeric(acs_data$year) #change data to numeric — to make sure we can join later.
+```
+
+```{r}
+join_df <- st_join(geo, cleveland_parcels, join = st_intersects, left = TRUE) %>% left_join(shutoffs_tract_summary, by = "GEOID") #spatially join cleveland parcels to census tract geometries
+
+#summarize shutoffs, plans, & notices by year and census tract
+
+join_df_summary <- join_df %>% group_by(GEOID, payment_plan_start_year) %>% summarise(
+  n_shutoffs_parcel = sum(n_shutoffs_parcel) %>% replace_na(0), #for tracts with no shutoffs, enter zero
+  n_shutoffs_tract = sum(n_shutoffs_tract) %>% replace_na(0),  
+  n_plans = sum(n_plans) %>% replace_na(0), #replace NA values with 0 - this is important for filtering later on
+  n_notices = sum(n_notices) %>% replace_na(0)
+) %>%
+  mutate(payment_plan_start_year = as.numeric(payment_plan_start_year))  #join to the census tract geomatry
+
+```
+
+```{r}
+#join the summarized data to ACS data by year and census tract.
+
+final_join <- left_join(join_df_summary, acs_data, by = c("GEOID" = "GEOID", "payment_plan_start_year" = "year")) %>% drop_na("NAME") 
+```
+
+```{r}
+st_write(final_join, delete_dsn = TRUE, "/Users/emmettmckinney/Dropbox (MIT)/RAship/ESI_Water_Affordability_031120/Data/WBEZ_Data/Cleveland/Data/cleveland_by_year_tract_summary_acs.geojson")
+
+#write out data as a .geojson 
+#overwrite existing files 
+
+write.csv(final_join %>% select(-geometry), file ="/Users/emmettmckinney/Dropbox (MIT)/RAship/ESI_Water_Affordability_031120/Data/WBEZ_Data/Cleveland/Data/cleveland_by_year_tract_summary_acs.csv")
+#write it out as a .csv, dropping geometry 
+```
+
+```{r}
+#summarize across census tracts 
+
+tracts_all_years_summary <- final_join %>% group_by(GEOID) %>% summarise( #summarize over time period of interest.
+          n_plans = sum(n_plans),
+          n_shutoffs_parcel = sum(n_shutoffs_parcel),
+          n_shutoffs_tract = sum(n_shutoffs_tract),
+          n_notices = sum(n_notices),
+          Total_Pop = mean(Total_PopE), 
+          White = mean(WhiteE), 
+          Black = mean(BlackE), 
+          Native = mean(NativeE), 
+          Asian = mean(AsianE),
+          Latino = mean(LatinoE),
+          HIPI = mean(HIPIE), 
+          Other = mean(OtherE),
+          TWOPLUS = mean(TWOPLUSE),
+          Utils_Incl = mean(Utils_InclE),
+          MHI = mean(MHIE),
+          TotalHH = mean(TotalHHE),
+          TotalOwn = mean(TotalOwnE), 
+          TotalRent = mean(TotalRentE),
+          WhiteOwn = mean(WhiteOwnE),
+          WhiteRent = mean(WhiteRentE),
+          BlackOwn = mean(BlackOwnE), 
+          BlackRent = mean(BlackRentE),
+          HispOwn = mean(HispOwnE),
+          HispRent = mean(HispRentE), 
+          MedYrBlt = mean(MedYrBltE), 
+          RenYrBlt = mean(RenYrBltE), 
+          OwnYrBlt = mean(OwnYrBltE), 
+          HH_Poverty = mean(HH_PovertyE),
+          Lowest_HI_Quintile =  mean(Lowest_HI_QuintileE)) %>%
+  left_join(geo, by = "GEOID") #join to the census tract geomatry
+```
+
+```{r}
+st_write(tracts_all_years_summary, delete_dsn = TRUE, "/Users/emmettmckinney/Dropbox (MIT)/RAship/ESI_Water_Affordability_031120/Data/WBEZ_Data/Cleveland/Data/cleveland_all_years_tract_summary_acs.geojson")
+
+write.csv(tracts_all_years_summary  %>% select(-geometry), file ="/Users/emmettmckinney/Dropbox (MIT)/RAship/ESI_Water_Affordability_031120/Data/WBEZ_Data/Cleveland/Data/cleveland_all_years_tract_summary_acs.csv")
+```
+
+***PART 4: PLOTTING SHUTOFF DATA TO MAKE SURE IT LOOKS RIGHT***
+
+```{r}
+##test to make sure that the shutoff plot looks right
+
+tract_summary <- st_read("/Users/emmettmckinney/Dropbox (MIT)/RAship/ESI_Water_Affordability_031120/Data/WBEZ_Data/Cleveland/Data/cleveland_all_years_tract_summary_acs.geojson")
+
+a <- plot(tract_summary['n_shutoffs_parcel']) #uh_oh! This visualization doesn't make any sense.
+b <- plot(tract_summary['n_shutoffs_tract']) #good thing we joined the point data to the tract level instead.
+c <- plot(tract_summary['n_plans'])
+d <- plot(tract_summary['n_notices'])
+
+```
+
+
+
+
+

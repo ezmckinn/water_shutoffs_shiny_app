@@ -1,0 +1,360 @@
+---
+title: "Cleveland Water Shutoffs Exploratory Data"
+author: "Emmett McKinney"
+date: "3/16/2019"
+output: html_document
+---
+
+**THIS DOCUMENT JOINS SHUTOFF WITH CENSUS DATA & DOES SOME INITIAL ANALYSIS**
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("/Users/emmettmckinney/Dropbox (MIT)/RAship/ESI_Water_Affordability_031120/Data/WBEZ_Data/Cleveland")
+```
+
+```{r}
+#Install needed packages 
+
+library(dplyr)
+library(readxl)
+library(stargazer)
+library(spdep)
+library(spatialreg)
+library(sf)
+library(leaflet)
+library(RColorBrewer)
+library(rstatix)
+library(ggplot2)
+```
+
+```{r}
+shutoffs <- st_read("/Users/emmettmckinney/Dropbox (MIT)/RAship/ESI_Water_Affordability_031120/Data/WBEZ_Data/Cleveland/Data/cleveland_all_years_tract_summary_acs.geojson") %>% mutate(shutoffs_1000p = ((n_shutoffs_tract)/(Total_Pop/1000)),
+         shutoffs_HH = (n_shutoffs_tract)/TotalHH,
+         Prc_W = White / Total_Pop,
+         Prc_Blk = Black / Total_Pop,
+         Prc_Hisp = Latino / Total_Pop,
+         Prc_W_Own = WhiteOwn/TotalHH,
+         Prc_B_Own = BlackOwn/TotalHH,
+         Prc_Hisp_Own = HispOwn/TotalHH,
+         Prc_Utils_Incl = Utils_Incl / TotalRent,
+         Prc_Rnt = TotalRent/TotalHH,
+         Prc_Own = TotalOwn/TotalHH,
+         Prc_NonW = 1-Prc_W,
+         Prc_NonW_Own = 1-Prc_W_Own,
+         Prc_HH_Pov = HH_Poverty/TotalHH,
+         log_Prc_NonW = log(Prc_NonW),
+         log_NonW_Own = log(Prc_NonW_Own),
+         log_shut = log(n_shutoffs_tract),
+         log_MHI = log(MHI),
+         log_Lowest_HI_Quintile = log(Lowest_HI_Quintile),
+          Maj_Minority = if_else(Prc_NonW > 0.5, "Yes", "No"),
+          log_Prc_Blk = log(Prc_Blk), 
+          log_MHI = log(MHI)) %>% filter(Total_Pop>0)
+  
+st_write(shutoffs, delete_dsn = TRUE, "./cleveland_tract_analysis.geojson")
+```
+
+```{r}
+a <- plot(shutoffs['n_shutoffs_tract']) 
+b <- plot(shutoffs['shutoffs_1000p'])
+c <- plot(shutoffs['Prc_HH_Pov])
+```
+
+**Analyze Shutoff Frequency Across Zip Codes - non spatial regression**
+
+*Descriptive Statistics*
+```{r}
+
+summary <- shutoffs %>% select(-"geometry") %>%
+summarise(
+    n = n(),
+    mean = mean(shutoffs_1000p),
+    max = max(shutoffs_1000p),
+    min = min (shutoffs_1000p),
+    sd = sd(shutoffs_1000p),
+    median = median(shutoffs_1000p),
+    Maj_Minority = ("Total")
+  ) 
+
+grouped_summary <- shutoffs %>% group_by(Maj_Minority) %>% select(-"geometry") %>% 
+summarise(
+    n = n(),
+    mean = mean(shutoffs_1000p),
+    max = max(shutoffs_1000p),
+    min = min (shutoffs_1000p),
+    sd = sd(shutoffs_1000p),
+    median = median(shutoffs_1000p)
+  ) 
+
+overall_summary <- grouped_summary %>% rbind(summary)
+overall_summary <- data.frame(overall_summary) %>% select(-geometry)
+overall_summary
+```
+
+```{r}
+means <- data.frame(shutoffs) %>% group_by(Maj_Minority) %>% summarise(mean = mean(log_shut))
+means
+
+p <- ggplot(shutoffs, aes(x=log_shut, fill = Maj_Minority, color = Maj_Minority)) +
+  geom_histogram(position = "identity", alpha = 0.5, bins = 50) + 
+  ggtitle("Shutoff Orders by Census Tract and Racial Majority, Cleveland") +
+  scale_fill_discrete(name = "Racial Makeup", labels = c("Majority White", "Majority Non-White")) +
+  ylab("Number of Census Tracts") +
+  xlab("Log Number of Shutoffs") +
+   geom_vline(data=means, aes(xintercept=mean, colour=Maj_Minority), linetype="dashed", size=1, show.legend = TRUE) 
+ 
+p
+```
+
+```{r}
+t_test <- shutoffs %>% t_test(log_shut ~ Maj_Minority) %>%
+  add_significance()
+t_test
+```
+
+```{r}
+pal <- colorBin("magma", domain = shutoffs$log_shut , bins = 7)
+leaflet(st_transform(shutoffs, 4326)) %>% 
+setView(-81.681290, 41.505493, 10) %>%  
+addProviderTiles("Stamen.Toner.Background") %>%
+addPolygons(
+fillColor = ~pal(log_shut),
+weight = 0,
+opacity = 1,
+color = 'white',
+fillOpacity = 0.8
+) %>%
+addLegend(
+pal = pal,
+values = ~log_shut,
+opacity = 0.8,
+title = NULL,
+position = "bottomright")
+
+#Test Response Variable for Autocorrelation
+weights <- nb2listw(poly2nb(shutoffs, queen = FALSE), style="W", zero.policy = TRUE)
+
+shutoffs_moran <- moran.test(shutoffs$log_shut, weights)
+print(shutoffs_moran)
+moran.plot(shutoffs$log_shut, weights)
+```
+
+```{r}
+#Standard OLS
+formula_1 <- log_shut ~ log_MHI + log(Prc_NonW)
+ols_1 <- lm(formula = formula_1, data = shutoffs)
+summary(ols_1)
+plot(ols_1)
+```
+
+
+```{r}
+plot(shutoffs['n_shutoffs_tract'])
+plot(shutoffs['n_plans'])
+plot(shutoffs['n_notices'])
+plot(shutoffs['Prc_NonW'])
+```
+
+
+```{r}
+#Check of autocorrelation in residuals of OLSs
+shutoffs$ols_resid_1 <- residuals(ols_1)
+
+shutoffs_pal_1 <- colorBin(
+  palette = "Spectral",
+  domain = c(-max(shutoffs$ols_resid_1), max(shutoffs$ols_resid_1)),
+  bins=7)
+
+leaflet(st_transform(shutoffs,4326)) %>% #file, cooridnate reff system 
+  addProviderTiles(providers$Stamen.Toner) %>% #tile layer 
+  addPolygons(smoothFactor = 0.2, fillOpacity = 0.8, #style polygons 
+              color = "#fff", weight = 1,
+              fillColor = ~shutoffs_pal_1(ols_resid_1))%>% 
+  addLegend(pal= shutoffs_pal_1, values =~ols_resid_1) # add legend 
+
+moran.plot(shutoffs$ols_resid_1, weights)
+moran.test(shutoffs$ols_resid_1, weights)
+```
+
+
+```{r}
+#Correct autocorrelation through Lag Model 
+lag_1 <- lagsarlm(
+  formula = formula_1, 
+  data = shutoffs, 
+  listw = weights, 
+  type = "lag"
+  )
+summary(lag_1)
+```
+
+```{r}
+#Check for residual autocorrelation correction
+shutoffs$lag_resid_1 <- residuals(lag_1)
+shutoffs_pal_1 <- colorBin(
+  palette = "Spectral",
+  domain = c(-max(shutoffs$lag_resid_1), max(shutoffs$lag_resid_1)),
+  bins = 7)
+
+leaflet(st_transform(shutoffs,4326)) %>%
+  addProviderTiles(providers$Stamen.TonerBackground) %>%
+  addPolygons(smoothFactor = 0.2, fillOpacity = 0.8,
+              color = "#fff", weight = 1,
+              fillColor = ~shutoffs_pal_1(lag_resid_1))%>%
+  addLegend(pal=shutoffs_pal_1, values=~lag_resid_1)
+
+moran.test(shutoffs$lag_resid_1, weights)
+moran.plot(shutoffs$lag_resid_1, weights)
+```
+
+```{r}
+#Impacts
+impacts(lag_1, listw=weights)
+```
+
+```{r}
+err_1 <- errorsarlm(
+  formula = formula_1, 
+  data = shutoffs, 
+  listw = weights
+  )
+
+shutoffs$err_resid <- residuals(err_1)
+moran.test(shutoffs$err_resid, weights)
+moran.plot(shutoffs$err_resid, weights)
+```
+
+```{r}
+comparison <- AIC(ols_1, err_1, lag_1)
+comparison
+#Conclusion: Error model is the best. 
+```
+
+```{r, results = "asis"}
+#Print results.
+
+#summary
+
+write.csv(overall_summary, file = "/Users/emmettmckinney/Dropbox (MIT)/RAship/ESI_Water_Affordability_031120/Data/WBEZ_Data/Cleveland/Results/Tracts/cleveland_summary_stats.csv")
+
+#T-test 
+write.csv(t_test, file = "/Users/emmettmckinney/Dropbox (MIT)/RAship/ESI_Water_Affordability_031120/Data/WBEZ_Data/Cleveland/Results/Tracts/cleveland_majmin_t_test.csv")
+
+#histogram
+ggsave(p, file = "/Users/emmettmckinney/Dropbox (MIT)/RAship/ESI_Water_Affordability_031120/Data/WBEZ_Data/Cleveland/Results/Tracts/cleveland_shutoffs_hist.png")
+
+#OLS
+
+stargazer(ols_1, type = "html", title = "OLS Regression - Log Shutoffs  vs. Log % Non-White and Log MHI by Zip Code, Cleveland", header = FALSE, covariate.labels = c("% Non-White","Median Household Income"), dep.var.labels = "Log # of Water Shutoffs", out = "/Users/emmettmckinney/Dropbox (MIT)/RAship/ESI_Water_Affordability_031120/Data/WBEZ_Data/Cleveland/Results/Tracts/cleveland_ols_1.html")
+
+#Lag model
+
+stargazer(lag_1, type = "html",  title = "Spatial Lag Model - Log Shutoffs  vs. Log % Non-White and Log MHI by Zip Code, Cleveland", header = FALSE, covariate.labels = c("% Non-White","Median Household Income"), dep.var.labels = "Log # of Water Shutoffs", out =  "/Users/emmettmckinney/Dropbox (MIT)/RAship/ESI_Water_Affordability_031120/Data/WBEZ_Data/Cleveland/Results/Tracts/cleveland_lag_1.html")
+
+#error model
+
+stargazer(err_1, type = "html", title = "Spatial Error Model - Log Shutoffs  vs. Log % Non-White and Log MHI by Zip Code, Cleveland", header = FALSE, covariate.labels = c("% Non-White","Median Household Income"), dep.var.labels = "Log # of Water Shutoffs",  out =  "/Users/emmettmckinney/Dropbox (MIT)/RAship/ESI_Water_Affordability_031120/Data/WBEZ_Data/Cleveland/Results/Tracts/cleveland_err_1.html")
+
+#AIC table
+
+write.csv(comparison, file = "/Users/emmettmckinney/Dropbox (MIT)/RAship/ESI_Water_Affordability_031120/Data/WBEZ_Data/Cleveland/Results/cleveland_AIC_comparison.csv")
+
+stargazer(ols_1, lag_1, err_1, type = "html", title = "Combined Spatial Regression Models: Cleveland Water Shutoffs", header = FALSE, covariate.labels = c("% Non-White","Median Household Income"), dep.var.labels = "Log # of Water Shutoffs", out =  "/Users/emmettmckinney/Dropbox (MIT)/RAship/ESI_Water_Affordability_031120/Data/WBEZ_Data/Cleveland/Results/Tracts/cleveland_combined_1.html")
+
+```
+
+```{r}
+formula_2 <- log(n_shutoffs_tract) ~ log(n_plans)
+ols_2 <- lm(formula = formula_2, data = shutoffs)
+summary(ols_2)
+plot(ols_2)
+
+shutoffs$ols_resid_2 <- residuals(ols_2)
+
+plot(log(shutoffs$n_shutoffs_tract), log(shutoffs$n_plans))
+plot(log(shutoffs$n_plans), log(shutoffs$Lowest_HI_Quintile))
+
+moran.plot(shutoffs$ols_resid_2, weights)
+moran.test(shutoffs$ols_resid_2, weights)
+
+```
+
+
+```{r}
+#Correct autocorrelation through Lag Model 
+lag_2 <- lagsarlm(
+  formula = formula_2, 
+  data = shutoffs, 
+  listw = weights, 
+  type = "lag"
+  )
+summary(lag_2)
+```
+
+```{r}
+#Check for residual autocorrelation correction
+shutoffs$lag_resid_2 <- residuals(lag_2)
+shutoffs_pal_2 <- colorBin(
+  palette = "Spectral",
+  domain = c(-max(shutoffs$lag_resid_2), max(shutoffs$lag_resid_2)),
+  bins = 7)
+
+leaflet(st_transform(shutoffs,4326)) %>%
+  addProviderTiles(providers$Stamen.TonerBackground) %>%
+  addPolygons(smoothFactor = 0.2, fillOpacity = 0.8,
+              color = "#fff", weight = 1,
+              fillColor = ~shutoffs_pal_2(lag_resid_2))%>%
+  addLegend(pal=shutoffs_pal_2, values=~lag_resid_2)
+
+moran.test(shutoffs$lag_resid_2, weights)
+moran.plot(shutoffs$lag_resid_2, weights)
+```
+
+```{r}
+#Impacts
+impacts(lag_2, listw=weights)
+```
+
+```{r}
+err_2 <- errorsarlm(
+  formula = formula_2, 
+  data = shutoffs, 
+  listw = weights
+  )
+
+shutoffs$err_resid <- residuals(err_2)
+moran.test(shutoffs$err_resid, weights)
+moran.plot(shutoffs$err_resid, weights)
+```
+
+```{r}
+comparison <- AIC(ols_2, err_2, lag_2)
+comparison
+#Conclusion: Error model is the best. 
+```
+
+```{r, results = "asis"}
+#Print results.
+
+#OLS
+
+stargazer(ols_2, type = "html", title = "OLS Regression - Log Shutoffs vs. Log Payment Plans by Tract, Cleveland", header = FALSE, covariate.labels = c("Log Payment Plans"), dep.var.labels = "Log # of Water Shutoffs", out = "/Users/emmettmckinney/Dropbox (MIT)/RAship/ESI_Water_Affordability_031120/Data/WBEZ_Data/Cleveland/Results/Tracts/cleveland_ols_2.html")
+
+#Lag model
+
+stargazer(lag_2, type = "html",  title = "Spatial Lag Model - Log Shutoffs vs. Log Payment Plans by Tract, Cleveland, Cleveland", header = FALSE, covariate.labels = c("Log Payment Plans"), dep.var.labels = "Log # of Water Shutoffs", out =  "/Users/emmettmckinney/Dropbox (MIT)/RAship/ESI_Water_Affordability_031120/Data/WBEZ_Data/Cleveland/Results/Tracts/cleveland_lag_2.html")
+
+#error model
+
+stargazer(err_2, type = "html", title = "Spatial Error Model - Log Shutoffs vs. Log Payment Plans by Tract, Cleveland", header = FALSE, covariate.labels = c("Log Payment Plans"), dep.var.labels = "Log # of Water Shutoffs",  out =  "/Users/emmettmckinney/Dropbox (MIT)/RAship/ESI_Water_Affordability_031120/Data/WBEZ_Data/Cleveland/Results/Tracts/cleveland_err_2.html")
+
+#AIC table
+
+write.csv(comparison, file = "/Users/emmettmckinney/Dropbox (MIT)/RAship/ESI_Water_Affordability_031120/Data/WBEZ_Data/Cleveland/Results/cleveland_AIC_comparison.csv")
+
+stargazer(ols_2, lag_2, err_2, type = "html", title = "Combined Models: Log Shutoffs vs. Log Payment Plans by Tract, Cleveland", header = FALSE, covariate.labels = c("Log Payment Plans"), dep.var.labels = "Log # of Water Shutoffs", out =  "/Users/emmettmckinney/Dropbox (MIT)/RAship/ESI_Water_Affordability_031120/Data/WBEZ_Data/Cleveland/Results/Tracts/cleveland_combined_2.html")
+
+```
+
+```
+
