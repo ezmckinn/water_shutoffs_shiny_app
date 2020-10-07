@@ -1,27 +1,17 @@
-#
-# This is the user-interface definition of a Shiny web application. You can
-# run the application by clicking 'Run App' above.
-#
-# Find out more about building applications with Shiny here:
-#
-#    http://shiny.rstudio.com/
-#
+**User Interface for the Water Vulnerability Explorer (WaVE)**
 
 library(shiny)
 library(shinydashboard)
 library(leaflet)
 library(DT)
 
-# Define UI for application that draws a histogram
-
-    ui <- dashboardPage(
+    ui <- dashboardPage( #build dashboard page
       
-        dashboardHeader(title = "Midwestern Water Shutoffs",
-                        titleWidth = 300),
+        dashboardHeader(title = "Midwestern Water Shutoffs", #title
+                        titleWidth = 300), #header width
         
-        dashboardSidebar(
+        dashboardSidebar( 
           width = 300,
-          
          
           #Variable Selector Input
           
@@ -31,7 +21,7 @@ library(DT)
             
             selectInput("map_var", 
                         label = "Select Independent Variable",
-                        choices = c('Total Shutoffs',
+                        choices = c('Total Shutoffs',   #menu options 
                                     'Shutoffs Per 1000 Residents',
                                     'Median Household Income',
                                     'Household Poverty Rate',
@@ -41,9 +31,9 @@ library(DT)
             
           ),
           
-          wellPanel(
+          wellPanel( #second panel for Regression Model variables 
           
-          "Regression Model Variable",
+          "Regression Model Variables", 
             
           selectInput("var", 
                       label = "Select Dependent Variable",
@@ -75,7 +65,6 @@ library(DT)
                    
                    plotOutput("hist"),
                    
-                   
                    value = "Map"),
                   # 
           tabPanel("Model", 
@@ -94,7 +83,7 @@ library(DT)
           tabPanel("The Data", DT::dataTableOutput("mytable")),
           
           tabPanel("About",
-          "Data for this project were collected through public records requests by American Public Media, and analyzed by the Science Impact Collaborative at MIT-DUSP.",
+          "Data for this project were collected through public records requests by American Public Media, and analyzed by Emmett McKinney at MIT-DUSP. Learn more at http://americanwatershutoffs.mit.edu/.",
           value = "About")
           )
         )
