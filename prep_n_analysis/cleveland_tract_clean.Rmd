@@ -14,7 +14,7 @@ setwd("/Users/emmettmckinney/Documents/CodeAcademy/Water_Shutoffs_App")
 
 #install new census key, over-writing any old keys.
 
-Sys.setenv(CENSUS_KEY="4c8277e5003e698cf77bbda813f1bcc7eb332b31") #set API key
+Sys.setenv(CENSUS_KEY="<YOUR-KEY>") #set API key
 readRenviron("~/.Renviron") #update R to use census key.
 ```
 
